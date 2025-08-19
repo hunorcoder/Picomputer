@@ -1,0 +1,51 @@
+
+.program vsync
+.side_set 1 opt ; Use side ??
+pull block ; Pull number of lines for active region (480)
+.wrap_target
+
+	mov x, osr
+	active:
+		wait 1 irq 0 ; Wait for a horizontal line
+		irq 1 ; Signal for RGB machine to run
+		jmp x-- active ; Repeat x times
+
+	set x, 9 ; Frontporch is 10 lines (this command uses one, so it compensates)
+	fporch:
+		wait 1 irq 0 ; Wait for horizontal line
+		jmp x-- fporch ; Repeat x times
+
+	; sync pulse
+	set pins, 1
+	wait 1 irq 0 ; wait 2 horizontal lines
+	wait 1 irq 0
+
+	; backporch (32-33 lines)
+	set x, 31 ; This command uses 1 out of those 32 clock cycles, so it has to compensate
+	bporch:
+		wait 1 irq 0  side 0; wait for line, set pins to 1
+		jmp x-- bporch ; repeat x times
+	wait 1 irq 0 ; 33rd line
+
+.wrap
+
+% c-sdk {
+	static inline void vsync_program_init(PIO pio, uint sm, uint offset, uint pin) {
+		// Get the def configuration, then change it to suit our needs
+		pio_sm_config c = hsync_program_get_default_config(offset);
+		// Set the `set` pins to 1 pin from `pin`
+		sm_config_set_set_pins(&c, pin, 1); 
+		// Set the `sideset` pins to `pin`
+		sm_config_set_sideset_pins(&c, pin);
+		// Set the clock divider to 5, to get down from 125MHz to 25MHz
+		sm_config_set_clkdiv(&c, 5); 
+		// Init the pin, aka connect it to the pad
+		pio_gpio_init(pio, pin); 
+		// Set the direction for 1 pin from `pin` to output
+		pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true); 
+		// Load the config and reset the state machine
+		pio_sm_init(pio, sm, offset, &c); 
+
+		// State machine will be started from main code
+	}
+%}
